@@ -121,8 +121,27 @@ only works if the extractor is honest about which rows are inferences.
 An episode is a **cognitively continuous situation**, not a time window and not a
 conversation. Boundaries fall where the thing being thought about changes.
 
-Open an episode when: a question is posed, a problem is encountered, a decision
-becomes live, or reflection begins.
+An event, activity, topic, or result by itself is not enough to establish an
+episode. Open one only when the source shows cognitive engagement with a
+situation: a question or problem is worked, information is sought, a hypothesis
+is made or checked, options are generated/compared/evaluated, a decision is
+made/deferred/abandoned, or reflection/revision occurs. A problem being
+mentioned or encountered is not by itself evidence that it was cognitively
+worked.
+
+Every episode must have at least one observable `cognitive_trace` step. The
+step must describe something stated or done in the source and cite its
+observation, which in turn has an exact source span. Do not invent a trace to
+make an episode persistable. An event may still be recorded as an episodic
+memory when it does not meet this episode threshold.
+
+Examples:
+
+- "Spent the afternoon debugging the payments outage" → episodic memory; no
+  episode unless the text gives observable cognitive engagement.
+- "Checked DNS, isolated a bad config, rolled it back" → problem-solving
+  episode with source-grounded traces; the rollback can be an action memory.
+
 Close it when: the question is answered, the decision is made or abandoned, or
 attention demonstrably moves elsewhere.
 
@@ -326,6 +345,23 @@ storage beyond `migrations/007_episode_model.sql`; each concept is deliberately
 routed to something that already carries provenance rather than becoming a
 free-floating field.
 
+**Attention, goal, project.** Attention is what the owner is focused on at a
+point in a situation; it can shift without an explicit intention. A goal is a
+desired outcome the owner is pursuing. A project is an ongoing, bounded
+initiative, not merely the topic currently mentioned or receiving attention.
+"I was focused on pricing, then dropped it to focus on the checkout bug"
+supports an attention shift, not by itself a goal or project. Add a goal only
+when the desired outcome is stated or otherwise directly supported (for
+example, "my goal was to restore checkout before launch"). A topic being on
+someone's mind is not enough to create a goal state item. Mentioning work on a
+project once is not enough to create a project state item.
+
+Never create a structured `decision` merely because attention changed or work
+was abandoned/committed. `abandon` and `commit` traces describe observable
+operations; a decision object requires an explicit choice between alternatives
+or a live decision question with alternatives, including a decision that is
+deferred. Do not invent alternatives to justify a decision record.
+
 **Goal.** Never `episode_candidate.goal` — that field does not exist. A goal
 discovered during an episode is an `episode_state_items[]` entry with
 `kind='goal'`, which persists as a `state_items` row with `episode_id` set.
@@ -355,13 +391,30 @@ These three answer different questions ("what was happening", "what did he
 visibly do", "what was decided and why") and collapsing any two of them
 loses information the others can't recover.
 
+**Resolution and outcome.** Resolution describes how the situation ended or
+where it stands: answered, decided, deferred, abandoned, interrupted, or still
+open. Outcome describes a consequence beyond that ending, attributable to the
+episode (for example, a later capability gained or a system consequence).
+If the text only states how the situation ended, record the resolution and
+leave outcome empty. If swapping the two fields would lose no information,
+omit outcome.
+
+**Outcome valence.** Set `outcome_valence` only when the text clearly supports
+a direction; otherwise leave it null. Never infer positive valence merely
+because work finished. Assign a non-positive valence only when the stated
+result is clearly negative ("the release slipped a week"). An unresolved
+result, such as a test that still fails, can be negative, but ambiguous
+wording is not evidence of direction: leave the valence null rather than
+infer one. A null valence is a correct answer, not a gap to fill.
+
 **Outcome invariant.** `decision.outcome`/`decision.reflection` are
 canonical whenever a `decision` object is present — `episode_candidate.outcome`
 MUST be null in that case (enforced by `core/extractor.py`, not just this
 convention). `episode_candidate.outcome` exists only for episodes with no
 decision at all — a `learning`, `reflection`, `social`, `creative`, or
-`routine` episode that nonetheless has a clear result ("the code review
-went well", "we didn't reach the CFO in time"). Do not populate both.
+`routine` episode that nonetheless has a consequence beyond how it ended
+("she now ships billing changes without review", "the release slipped a
+week"). Do not populate both.
 
 **Knowns are not a field.** What the owner already knew going into or during
 the episode is simply whichever observations/beliefs the episode's

@@ -195,6 +195,53 @@ def _episode_obs(text: str) -> dict:
     return _obs(text)
 
 
+def _episode_case(key: str, label: str, text: str, *, episode: dict | None = None,
+                  traces: list[dict] | None = None,
+                  state_items: list[dict] | None = None,
+                  memories: list[dict] | None = None,
+                  observations: list[dict] | None = None,
+                  entities: list[dict] | None = None) -> CalibrationFixture:
+    """Build a compact hand-authored calibration response for episode edges.
+
+    Pass `observations` (one per visible step) whenever the fixture has
+    traces, so each trace cites the clause it is evidence for rather than the
+    whole passage -- a whole-text observation makes every citation trivially
+    "grounded" and the trace-support check meaningless."""
+    return CalibrationFixture(
+        key=key, label=label, description=label, text=text, source_type="note",
+        mock_json=json.dumps({
+            "observations": observations or [_episode_obs(text)],
+            "entities": entities or [],
+            "memories": memories or [], "beliefs": [],
+            "episode_candidate": episode,
+            "cognitive_traces": traces or [],
+            "episode_state_items": state_items or [], "decision": None,
+            "ambiguous": False, "ambiguity_note": "",
+        }),
+    )
+
+
+def _episode_draft(text: str, kind: str, title: str, *,
+                   resolution: str | None = None, outcome: str | None = None,
+                   outcome_valence: float | None = None) -> dict:
+    return {
+        "kind": kind, "title": title, "trigger": None, "narrative": None,
+        "resolution": resolution, "salience": 0.5, "outcome": outcome,
+        "outcome_valence": outcome_valence, "evidence_span": text,
+    }
+
+
+def _trace(operation: str, target: str, observation_index: int = 0) -> dict:
+    return {"operation": operation, "target": target,
+            "observation_index": observation_index, "confidence": 0.7}
+
+
+def _episodic_memory(text: str) -> dict:
+    return {"memory_system": "episodic", "kind": "event", "content": text,
+            "salience": 0.5, "emotion_is_stated": False,
+            "evidence_span": text, "is_episode_action": False}
+
+
 _TEXT_F = (
     "I was debating whether to raise a seed round. I did not know our real "
     "burn rate. I asked the CFO for the numbers. He said we had 8 months "
@@ -208,13 +255,21 @@ _FIXTURE_F = CalibrationFixture(
                  "a linked decision, and an action memory -- the canonical episode shape.",
     text=_TEXT_F, source_type="note",
     mock_json=json.dumps({
-        "observations": [_episode_obs(_TEXT_F)],
-        "entities": [{"canonical_name": "CFO", "kind": "person", "mention_span": _TEXT_F[0:3]}],
+        # One observation per sentence so each trace cites its own step.
+        "observations": [
+            _obs("I was debating whether to raise a seed round."),
+            _obs("I did not know our real burn rate."),
+            _obs("I asked the CFO for the numbers."),
+            _obs("He said we had 8 months left.", "reported", "other_person"),
+            _obs("I decided to raise now rather than wait."),
+            _obs("I emailed our lead investor that afternoon."),
+        ],
+        "entities": [{"canonical_name": "CFO", "kind": "person", "mention_span": "CFO"}],
         "memories": [{
             "memory_system": "episodic", "kind": "event",
-            "content": "Emailed the lead investor to start the fundraising process.",
+            "content": "Emailed our lead investor that afternoon.",
             "salience": 0.6, "emotion_is_stated": False,
-            "evidence_span": _TEXT_F[0:len(_TEXT_F)],
+            "evidence_span": "I emailed our lead investor that afternoon.",
             "is_episode_action": True,
         }],
         "beliefs": [],
@@ -226,19 +281,21 @@ _FIXTURE_F = CalibrationFixture(
             "evidence_span": _TEXT_F[0:len(_TEXT_F)],
         },
         "cognitive_traces": [
-            {"operation": "identify_unknown", "target": "actual burn rate", "observation_index": 0, "confidence": 0.8},
-            {"operation": "seek_information", "target": "asked the CFO for the numbers", "observation_index": 0, "confidence": 0.8},
-            {"operation": "decide", "target": "raise now rather than wait", "observation_index": 0, "confidence": 0.7},
+            {"operation": "identify_unknown", "target": "our real burn rate", "observation_index": 1, "confidence": 0.8},
+            {"operation": "seek_information", "target": "asked the CFO for the numbers", "observation_index": 2, "confidence": 0.8},
+            {"operation": "decide", "target": "raise now rather than wait", "observation_index": 4, "confidence": 0.7},
         ],
         "episode_state_items": [],
+        # Only what the text states: the two alternatives ("raise now rather
+        # than wait") and the choice. No rationale, confidence or
+        # reversibility is given, so none is recorded (classification.md §10).
         "decision": {
             "question": "Should we raise a seed round now or wait?",
-            "options": [{"label": "raise now", "rationale": "runway is short"},
-                        {"label": "wait", "rationale": "could get better terms later"}],
-            "chosen_option": "raise now", "rationale": "8 months of runway is too tight to wait",
-            "confidence_at_time": 0.6, "reversibility": "costly",
+            "options": [{"label": "raise now"}, {"label": "wait"}],
+            "chosen_option": "raise now", "rationale": None,
+            "confidence_at_time": None, "reversibility": None,
             "outcome": None, "outcome_valence": None, "reflection": None,
-            "evidence_span": _TEXT_F[0:len(_TEXT_F)],
+            "evidence_span": "I decided to raise now rather than wait.",
         },
         "ambiguous": False, "ambiguity_note": "",
     }),
@@ -257,30 +314,41 @@ _FIXTURE_G = CalibrationFixture(
                  "(the toy operator actually built).",
     text=_TEXT_G, source_type="note",
     mock_json=json.dumps({
-        "observations": [_episode_obs(_TEXT_G)],
+        "observations": [
+            _obs("I spent the afternoon learning how Kubernetes operators work."),
+            _obs("I read through the docs"),
+            _obs("built a small toy operator to see reconciliation loops in action"),
+            _obs("By the end I could explain the reconciliation loop to someone else."),
+        ],
         "entities": [],
         "memories": [
             {"memory_system": "procedural", "kind": "skill",
              "content": "Comfortable explaining how Kubernetes operator reconciliation loops work.",
              "salience": 0.6, "emotion_is_stated": False,
-             "evidence_span": _TEXT_G[0:len(_TEXT_G)]},
+             "evidence_span": "By the end I could explain the reconciliation loop to someone else."},
             {"memory_system": "episodic", "kind": "event",
              "content": "Built a toy Kubernetes operator to see reconciliation loops in action.",
              "salience": 0.5, "emotion_is_stated": False,
-             "evidence_span": _TEXT_G[0:len(_TEXT_G)],
+             "evidence_span": "built a small toy operator to see reconciliation loops in action",
              "is_episode_action": True},
         ],
         "beliefs": [],
+        # The capability gained is a consequence beyond how the afternoon
+        # ended, so it is the outcome, not the resolution (classification.md
+        # §10). Valence is positive because the stated result clearly is.
         "episode_candidate": {
             "kind": "learning", "title": "Learning how Kubernetes operators work",
             "trigger": None, "narrative": "Read the docs, then built a toy operator to see it work.",
-            "resolution": "Could explain the reconciliation loop by the end.", "salience": 0.6,
-            "outcome": None, "outcome_valence": None,
+            "resolution": "Worked through the docs and a toy operator over the afternoon.", "salience": 0.6,
+            "outcome": "Could explain the reconciliation loop to someone else.", "outcome_valence": 0.5,
             "evidence_span": _TEXT_G[0:len(_TEXT_G)],
         },
+        # Building a toy operator "to see" the loop is an experiment to gather
+        # information, not a revision: nothing in the text was believed and
+        # then changed.
         "cognitive_traces": [
-            {"operation": "seek_information", "target": "read the operator docs", "observation_index": 0, "confidence": 0.8},
-            {"operation": "revise", "target": "understanding of reconciliation loops", "observation_index": 0, "confidence": 0.7},
+            {"operation": "seek_information", "target": "read through the docs", "observation_index": 1, "confidence": 0.8},
+            {"operation": "seek_information", "target": "built a small toy operator to see reconciliation loops in action", "observation_index": 2, "confidence": 0.7},
         ],
         "episode_state_items": [],
         "decision": None,
@@ -302,13 +370,15 @@ _FIXTURE_H = CalibrationFixture(
     text=_TEXT_H, source_type="note",
     mock_json=json.dumps({
         "observations": [
+            # The span includes the "Looking back" lead-in because that is the
+            # visible reflection the reflect trace cites.
             {"content": "I used to think speed mattered more than user research.",
              "epistemic_status": "retracted", "epistemic_owner": "owner",
-             "span": _TEXT_H[26:26 + len("I used to think speed mattered more than user research.")],
+             "span": "Looking back on the failed launch, I used to think speed mattered more than user research.",
              "extraction_confidence": 0.9, "source_reliability": 1.0},
             {"content": "Without validating demand first, speed just gets you to failure faster.",
              "epistemic_status": "asserted", "epistemic_owner": "owner",
-             "span": _TEXT_H[0:len(_TEXT_H)],
+             "span": "Now I think the opposite: without validating demand first, speed just gets you to failure faster.",
              "extraction_confidence": 0.9, "source_reliability": 1.0},
         ],
         "entities": [],
@@ -317,7 +387,7 @@ _FIXTURE_H = CalibrationFixture(
             {"proposition": "Validating demand before building matters more than speed",
              "belief_kind": "normative", "epistemic_owner": "owner", "domain": "product strategy",
              "holding_confidence": 0.85, "truth_confidence": 0.7,
-             "evidence_span": _TEXT_H[0:len(_TEXT_H)]},
+             "evidence_span": "Now I think the opposite: without validating demand first, speed just gets you to failure faster."},
         ],
         "episode_candidate": {
             "kind": "reflection", "title": "Reflecting on why the launch failed",
@@ -350,7 +420,7 @@ _FIXTURE_I = CalibrationFixture(
     text=_TEXT_I, source_type="note",
     mock_json=json.dumps({
         "observations": [_episode_obs(_TEXT_I)],
-        "entities": [{"canonical_name": "Co-founder", "kind": "person", "mention_span": _TEXT_I[3:14]}],
+        "entities": [{"canonical_name": "Co-founder", "kind": "person", "mention_span": "co-founder"}],
         "memories": [],
         "beliefs": [],
         "episode_candidate": {
@@ -374,7 +444,7 @@ _FIXTURE_I = CalibrationFixture(
             "options": [{"label": "hire now", "rationale": "co-founder wants to move fast"},
                         {"label": "wait", "rationale": "preserve runway"}],
             "chosen_option": None, "rationale": "No agreement reached yet",
-            "confidence_at_time": None, "reversibility": "costly",
+            "confidence_at_time": None, "reversibility": None,
             "outcome": None, "outcome_valence": None, "reflection": None,
             "evidence_span": _TEXT_I[0:len(_TEXT_I)],
         },
@@ -471,7 +541,7 @@ _FIXTURE_L = CalibrationFixture(
             "evidence_span": _TEXT_L[0:len(_TEXT_L)],
         },
         "cognitive_traces": [
-            {"operation": "commit", "target": "dropped the pricing work to focus on the bug", "observation_index": 0, "confidence": 0.8},
+            {"operation": "abandon", "target": "dropped the pricing work", "observation_index": 0, "confidence": 0.8},
         ],
         "episode_state_items": [
             {"kind": "attention", "content": "Pricing page redesign", "priority": 0.3, "activation": 0.1,
@@ -533,7 +603,9 @@ _FIXTURE_N = CalibrationFixture(
         "episode_candidate": {
             "kind": "decision", "title": "Migrating the database from MongoDB to Postgres",
             "trigger": None, "narrative": "Decided to migrate three months ago.",
-            "resolution": "Migration completed, six weeks late but successful.", "salience": 0.6,
+            # Resolution is how the situation ended (decided). The delay and the
+            # performance gain are consequences, carried by decision.outcome.
+            "resolution": "Decided to switch from MongoDB to Postgres.", "salience": 0.6,
             "outcome": None, "outcome_valence": None,  # MUST stay null -- decision.outcome is canonical
             "evidence_span": _TEXT_N[0:len(_TEXT_N)],
         },
@@ -543,14 +615,16 @@ _FIXTURE_N = CalibrationFixture(
         "episode_state_items": [],
         "decision": {
             "question": "Should we migrate from MongoDB to Postgres?",
-            "options": [{"label": "migrate to Postgres", "rationale": "better consistency guarantees"},
-                        {"label": "stay on MongoDB", "rationale": "avoid migration risk"}],
-            "chosen_option": "migrate to Postgres", "rationale": "Wanted stronger consistency guarantees",
-            "confidence_at_time": 0.6, "reversibility": "costly",
+            # "Switch from MongoDB to Postgres" names both alternatives. The
+            # text gives no reason, confidence or reversibility, so none is
+            # recorded (classification.md §10: do not invent).
+            "options": [{"label": "migrate to Postgres"}, {"label": "stay on MongoDB"}],
+            "chosen_option": "migrate to Postgres", "rationale": None,
+            "confidence_at_time": None, "reversibility": None,
             "outcome": "Took six weeks longer than planned, but query performance improved "
                        "dramatically with no data consistency bugs since.",
             "outcome_valence": 0.7,
-            "reflection": "Worth the delay in hindsight.",
+            "reflection": None,
             "evidence_span": _TEXT_N[0:len(_TEXT_N)],
         },
         "ambiguous": False, "ambiguity_note": "",
@@ -558,9 +632,9 @@ _FIXTURE_N = CalibrationFixture(
 )
 
 _TEXT_O = (
-    "I spent the sprint pairing with a junior engineer on our billing "
-    "module. By the end of the week she was shipping changes to it on her "
-    "own without needing review on every PR."
+    "I walked her through the reconciliation logic and had her debug two "
+    "failing tests herself; by Friday she was shipping billing changes on "
+    "her own without needing review on every PR."
 )
 _FIXTURE_O = CalibrationFixture(
     key="episode_outcome_without_decision",
@@ -572,16 +646,16 @@ _FIXTURE_O = CalibrationFixture(
         "observations": [_episode_obs(_TEXT_O)],
         "entities": [], "memories": [], "beliefs": [],
         "episode_candidate": {
-            "kind": "learning", "title": "Pairing with a junior engineer on the billing module",
-            "trigger": None, "narrative": "Paired for the sprint to build her familiarity with the module.",
-            "resolution": "She was shipping changes independently by the end of the week.", "salience": 0.6,
+            "kind": "learning", "title": "Coaching a junior engineer on billing changes",
+            "trigger": None, "narrative": "Walked through the logic and asked her to debug failing tests.",
+            "resolution": None, "salience": 0.6,
             "outcome": "By the end of the week she was shipping changes to the billing module "
                        "independently, without needing review on every PR.",
             "outcome_valence": 0.8,
             "evidence_span": _TEXT_O[0:len(_TEXT_O)],
         },
         "cognitive_traces": [
-            {"operation": "delegate", "target": "billing module changes, to the junior engineer", "observation_index": 0, "confidence": 0.6},
+            {"operation": "delegate", "target": "had her debug two failing tests herself", "observation_index": 0, "confidence": 0.7},
         ],
         "episode_state_items": [],
         "decision": None,
@@ -589,11 +663,125 @@ _FIXTURE_O = CalibrationFixture(
     }),
 )
 
+# Episode-boundary and field-separation counterexamples. These deliberately
+# pair bare activity/topic mentions with nearby examples that do show a
+# source-grounded cognitive operation.
+_TEXT_P = "Spent the afternoon debugging the payments outage."
+_FIXTURE_P = _episode_case(
+    "episode_bare_activity", "Bare activity is episodic memory, not an episode",
+    _TEXT_P, memories=[_episodic_memory(_TEXT_P)],
+)
+
+_TEXT_Q = (
+    "I checked DNS, compared the CNI config against the known-good cluster, "
+    "found the mismatch, and rolled it back."
+)
+_FIXTURE_Q = _episode_case(
+    "episode_visible_investigation", "Visible investigation supports an episode",
+    _TEXT_Q,
+    observations=[_obs("I checked DNS"),
+                  _obs("compared the CNI config against the known-good cluster"),
+                  _obs("found the mismatch"),
+                  _obs("rolled it back")],
+    episode=_episode_draft(_TEXT_Q, "problem_solving", "Investigating a CNI config mismatch",
+                           resolution="Rolled back the mismatched CNI config."),
+    traces=[_trace("seek_information", "checked DNS", 0),
+            _trace("compare", "compared the CNI config against the known-good cluster", 1)],
+    memories=[{"memory_system": "episodic", "kind": "event",
+               "content": "Rolled back the mismatched CNI config.", "salience": 0.5,
+               "emotion_is_stated": False, "evidence_span": "rolled it back",
+               "is_episode_action": True}],
+)
+
+_TEXT_R = (
+    "I stopped the pricing work and focused on the checkout bug; my goal "
+    "was to restore checkout before launch."
+)
+_FIXTURE_R = _episode_case(
+    "episode_attention_shift_with_goal", "Attention shift and explicit goal",
+    _TEXT_R,
+    episode=_episode_draft(_TEXT_R, "problem_solving", "Restoring checkout before launch"),
+    traces=[_trace("abandon", "stopped the pricing work")],
+    state_items=[
+        {"kind": "attention", "content": "Checkout bug", "priority": 0.9,
+         "activation": 0.9, "evidence_span": _TEXT_R},
+        {"kind": "goal", "content": "Restore checkout before launch", "priority": 0.9,
+         "activation": 0.9, "evidence_span": _TEXT_R},
+    ],
+)
+
+_TEXT_S = "Pricing has been on my mind lately."
+_FIXTURE_S = _episode_case(
+    "episode_topic_not_goal", "Topic mention does not establish a goal",
+    _TEXT_S,
+)
+
+_TEXT_T = "Worked on Phynx today."
+# The correct home for "Phynx" is an entity of kind project linked to the
+# memory (classification.md §7.1) -- not a project state item or an episode.
+_FIXTURE_T = _episode_case(
+    "episode_project_mention_only", "Project mention is not project state or episode",
+    _TEXT_T,
+    entities=[{"canonical_name": "Phynx", "kind": "project", "mention_span": "Phynx"}],
+    memories=[{**_episodic_memory(_TEXT_T),
+               "involved_entities": [{"canonical_name": "Phynx", "role": "subject"}]}],
+)
+
+_TEXT_U = "We paired through the sprint."
+_FIXTURE_U = _episode_case(
+    "episode_activity_without_outcome", "Activity without outcome or visible engagement",
+    _TEXT_U, memories=[_episodic_memory(_TEXT_U)],
+)
+
+# "It still fails" is where the situation stands (the resolution). The
+# outcome must be a consequence beyond that ending, and the valence is
+# negative because the stated consequence clearly is.
+_TEXT_V = (
+    "I checked the retry path and compared CI logs, but the test still fails "
+    "after two days, so the release slipped a week."
+)
+_FIXTURE_V = _episode_case(
+    "episode_negative_outcome", "Engaged episode with a clearly negative outcome",
+    _TEXT_V,
+    observations=[_obs("I checked the retry path"),
+                  _obs("compared CI logs"),
+                  _obs("the test still fails after two days"),
+                  _obs("the release slipped a week")],
+    episode=_episode_draft(
+        _TEXT_V, "problem_solving", "Investigating a failing test",
+        resolution="Still open: the test still fails after two days.",
+        outcome="The release slipped a week.",
+        outcome_valence=-0.5,
+    ),
+    traces=[_trace("seek_information", "checked the retry path", 0),
+            _trace("compare", "compared CI logs", 1)],
+)
+
+# The owner's valence nuance: an unresolved result can be negative, but
+# "still fails" alone does not state a consequence or its direction. The
+# resolution carries it; outcome stays empty and no valence is inferred.
+_TEXT_X = "I checked the retry path and compared CI logs; the test still fails."
+_FIXTURE_X = _episode_case(
+    "episode_unresolved_without_outcome", "Unresolved result is a resolution, not an inferred negative outcome",
+    _TEXT_X,
+    observations=[_obs("I checked the retry path"),
+                  _obs("compared CI logs"),
+                  _obs("the test still fails")],
+    episode=_episode_draft(
+        _TEXT_X, "problem_solving", "Investigating a failing test",
+        resolution="Still open: the test still fails.",
+    ),
+    traces=[_trace("seek_information", "checked the retry path", 0),
+            _trace("compare", "compared CI logs", 1)],
+)
+
 
 FIXTURES: list[CalibrationFixture] = [
     _FIXTURE_A, _FIXTURE_B, _FIXTURE_C, _FIXTURE_D, _FIXTURE_E,
     _FIXTURE_F, _FIXTURE_G, _FIXTURE_H, _FIXTURE_I, _FIXTURE_J,
     _FIXTURE_K, _FIXTURE_L, _FIXTURE_M, _FIXTURE_N, _FIXTURE_O,
+    _FIXTURE_P, _FIXTURE_Q, _FIXTURE_R, _FIXTURE_S, _FIXTURE_T,
+    _FIXTURE_U, _FIXTURE_V, _FIXTURE_X,
 ]
 
 

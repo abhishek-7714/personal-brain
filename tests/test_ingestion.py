@@ -396,6 +396,10 @@ MOCK8: dict[str, Any] = {
     "episode_candidate": {"kind": "reflection",
                           "title": "Revision: speed vs. customer understanding",
                           "trigger": "explicit belief update"},
+    # The revision is stated ("but now I think ..."), so it is the observable
+    # step that establishes the episode; it cites the new-view observation.
+    "cognitive_traces": [{"operation": "revise", "target": "moving fast vs. understanding the customer",
+                          "observation_index": 1, "confidence": 0.8}],
     "ambiguous": False, "ambiguity_note": "",
 }
 r8 = accept("8.0 validator accepts fixture 8", MOCK8, TEXT8)
@@ -409,6 +413,20 @@ check("8.4 no memory created (belief revision is a belief, not a memory)",
 check("8.5 episode_candidate=reflection (classification.md §9 step requires explicit revision)",
       r8.episode_candidate is not None and r8.episode_candidate.kind == "reflection")
 check("8.6 two observations (one per side of the revision)", len(r8.observations) == 2)
+check("8.7 the episode is established by a cited revise step",
+      [t.operation for t in r8.cognitive_traces] == ["revise"])
+
+# classification.md §4: an episode with no observable trace is an empty shell.
+# The validator must reject it outright, not leave it for calibration to flag,
+# because ingest() persists whatever validation accepts.
+MOCK8_NO_TRACE = {**MOCK8, "cognitive_traces": []}
+reject("8.8 rejects an episode with no cognitive_traces", MOCK8_NO_TRACE, TEXT8,
+       "requires at least one cognitive_traces")
+MOCK8_STATE_ONLY = {**MOCK8_NO_TRACE, "episode_state_items": [
+    {"kind": "attention", "content": "customer understanding", "priority": 0.5,
+     "activation": 0.5, "evidence_span": TEXT8[48:len(TEXT8)]}]}
+reject("8.9 a state item alone does not establish an episode", MOCK8_STATE_ONLY, TEXT8,
+       "requires at least one cognitive_traces")
 
 
 # ===========================================================================

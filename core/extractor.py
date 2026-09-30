@@ -162,10 +162,14 @@ Return ONLY a JSON object with this exact structure (no markdown fences):
     "title": "string",
     "trigger": "<string or null>",
     "narrative": "<string or null — a short prose account of the episode>",
-    "resolution": "<string or null — how it concluded, if it did>",
+    "resolution": "<string or null — how the situation ended or where it stands:
+      answered, decided, deferred, abandoned, interrupted, or still open>",
     "salience": <0.0-1.0>,
-    "outcome": "<string or null — ONLY if this episode has NO decision object below>",
-    "outcome_valence": <-1.0 to 1.0 or null>,
+    "outcome": "<string or null — ONLY if this episode has NO decision object below,
+      and only for a consequence beyond the resolution; null if it would merely
+      restate the resolution>",
+    "outcome_valence": <-1.0 to 1.0, or null unless the text clearly supports a
+      direction — never positive just because work finished>,
     "evidence_span": "<EXACT quote copied character-for-character from the source text>"
   } or null,
   "cognitive_traces": [
@@ -197,7 +201,7 @@ Return ONLY a JSON object with this exact structure (no markdown fences):
     "confidence_at_time": <0.0-1.0 or null>,
     "reversibility": "reversible|costly|irreversible or null",
     "outcome": "<string or null>",
-    "outcome_valence": <-1.0 to 1.0 or null>,
+    "outcome_valence": <-1.0 to 1.0, or null unless the text clearly supports a direction>,
     "reflection": "<string or null>",
     "evidence_span": "<EXACT quote copied character-for-character from the source text>"
   } or null,
@@ -233,6 +237,13 @@ Critical rules that override everything else:
    is canonical). Only set episode_candidate.outcome when there is no decision.
 10. At most one memory may have is_episode_action=true, and only when
     episode_candidate is set.
+11. An episode requires at least one observable cognitive_traces step. Every
+    step must cite a real observation with a source span. A state item or a
+    decision-shaped object alone does not establish episode existence; do not
+    invent a trace to satisfy this requirement.
+12. A commit or abandon trace does not by itself establish a structured
+    decision. Emit decision only for an explicit choice between alternatives
+    or a live decision question with alternatives, including one deferred.
 """
 
 
@@ -758,6 +769,18 @@ def validate_extraction_response(
     except ExtractionValidationError as exc:
         errors.append(f"decision: {exc}")
         decision = None
+
+    # An episode is only established by observable cognitive engagement
+    # (classification.md §4). Without this check the rule lived only in the
+    # prompt, so a trace-less episode would pass validation and be persisted
+    # by ingest(); calibration would flag it but production would keep it.
+    # A state item or decision alone is a container, not engagement.
+    if episode is not None and not raw_traces:
+        errors.append(
+            "episode_candidate: an episode requires at least one cognitive_traces "
+            "step citing an observation (classification.md §4) -- emit no episode "
+            "instead of an empty shell"
+        )
 
     # decision.outcome is canonical over episode_candidate.outcome -- they
     # must never both be set (classification.md's outcome invariant).

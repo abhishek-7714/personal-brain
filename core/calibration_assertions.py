@@ -1,7 +1,11 @@
 """
 core/calibration_assertions.py
 
-Expected semantic assertions for the 15 calibration fixtures.
+Expected semantic assertions for every calibration fixture in
+core/calibration_fixtures.py.
+
+Code prefixes: `U-` is reserved for UNIVERSAL_ASSERTIONS; each fixture uses
+its own letter, so no fixture code can collide with a universal one.
 
 These are deliberately written from core/classification.md's rules and each
 fixture's SOURCE TEXT -- not from the fixture's mock JSON. That distinction
@@ -148,10 +152,63 @@ def _u_no_unstated_emotion(view: CanonicalView):
 def _u_episode_not_empty(view: CanonicalView):
     if view.episode is None:
         return (True, "no episode")
-    populated = bool(view.traces or view.state_items or view.decisions)
-    return (populated,
-            f"episode '{view.episode.title[:40]}' traces={len(view.traces)} "
-            f"state_items={len(view.state_items)} decisions={len(view.decisions)}")
+    # The episode threshold is observable cognitive engagement, not merely
+    # the presence of an associated state item or decision-shaped container.
+    grounded = bool(view.traces) and all(t.cites_observation for t in view.traces)
+    return (grounded,
+            f"episode '{view.episode.title[:40]}' has {len(view.traces)} "
+            f"trace(s); every trace must cite an observation")
+
+
+def _no_episode_state_kind(*kinds: str):
+    def check(view: CanonicalView):
+        found = [s.kind for s in view.state_items if s.kind in kinds]
+        return (not found, f"forbidden state item kinds present: {found or 'none'}")
+    return check
+
+
+def _no_memory_kind(kind: str):
+    def check(view: CanonicalView):
+        found = [m.content[:35] for m in view.memories if m.kind == kind]
+        return (not found, f"memories of kind '{kind}': {found or 'none'}")
+    return check
+
+
+def _episode_has_resolution_without_outcome(view: CanonicalView):
+    resolution = view.episode.resolution if view.episode else None
+    outcome = view.episode.outcome if view.episode else None
+    return (bool(resolution) and outcome is None,
+            f"resolution={resolution!r}; outcome={outcome!r}")
+
+
+# An outcome restates its resolution when it adds almost nothing new. The
+# measure is one-directional on purpose: an outcome is SUPPOSED to extend the
+# resolution ("the test passed" -> "the test passed and cut latency in half"),
+# so shared words are expected and only the share of NEW words matters. A
+# symmetric overlap flagged exactly those valid extensions.
+_MIN_NEW_CONTENT = 0.2
+
+
+def _new_content_share(resolution: str, outcome: str) -> float:
+    """Fraction of the outcome's content words absent from the resolution."""
+    wr, wo = _words(resolution), _words(outcome)
+    if not wo:
+        return 0.0 if outcome.strip().lower() == resolution.strip().lower() else 1.0
+    return len(wo - wr) / len(wo)
+
+
+def _u_outcome_not_restated_resolution(view: CanonicalView):
+    ep = view.episode
+    if ep is None or not ep.outcome or not ep.resolution:
+        return (True, "no outcome/resolution pair to compare")
+    share = _new_content_share(ep.resolution, ep.outcome)
+    return (share >= _MIN_NEW_CONTENT,
+            f"outcome adds {share:.0%} new content words; resolution={ep.resolution!r}; outcome={ep.outcome!r}")
+
+
+def _episode_valence_not_positive(view: CanonicalView):
+    v = view.episode.outcome_valence if view.episode else None
+    return (v is None or v <= 0, f"outcome_valence={v}")
 
 
 def _u_outcome_invariant(view: CanonicalView):
@@ -226,6 +283,11 @@ UNIVERSAL_ASSERTIONS: list[Assertion] = [
     Assertion("U-OVR-1", DIM_OVER_INFERENCE, "No stated emotion claimed unless the text names an emotion", True, _u_no_unstated_emotion),
     Assertion("U-OVR-2", DIM_EPISODE, "An episode, if emitted, is not an empty shell", True, _u_episode_not_empty),
     Assertion("U-EPI-1", DIM_DECISION, "Outcome invariant: decision present => episode.outcome NULL", True, _u_outcome_invariant),
+    # Advisory: word overlap cannot decide classification.md §10's semantic
+    # "would swapping lose anything?" test, and a live model's paraphrases
+    # would make it flaky. The essential signal comes from paired fixtures
+    # (G-OUT-1, V-OUT-1, X-OUT-1) whose correct split is known.
+    Assertion("U-EPI-2", DIM_EPISODE, "An episode outcome adds content beyond its resolution (advisory, lexical)", False, _u_outcome_not_restated_resolution),
     Assertion("U-ENT-1", DIM_ENTITY, "Every belief.about_entity resolves to a declared entity", True, _u_belief_entity_resolves),
     Assertion("U-ENT-2", DIM_ENTITY, "Every state_item.about_entity resolves to a declared entity", True, _u_state_item_entity_resolves),
     Assertion("U-OVR-3", DIM_OVER_INFERENCE, "Trace targets are lexically grounded in the source text (advisory)", False, _u_trace_grounding_advisory),
@@ -335,14 +397,18 @@ def _decision_has_outcome(positive: bool = True):
     return check
 
 
-def _episode_has_outcome(positive: bool = True):
+def _episode_has_outcome(positive: Optional[bool] = True):
+    """positive=True requires valence > 0, False requires a set valence <= 0,
+    None checks only that an outcome exists (valence not asserted)."""
     def check(view: CanonicalView):
         if view.episode is None:
             return (False, "no episode emitted")
         if view.episode.outcome is None:
             return (False, "episode.outcome is NULL")
-        if positive and (view.episode.outcome_valence is None or view.episode.outcome_valence <= 0):
+        if positive is True and (view.episode.outcome_valence is None or view.episode.outcome_valence <= 0):
             return (False, f"episode.outcome set but valence={view.episode.outcome_valence} (expected > 0)")
+        if positive is False and (view.episode.outcome_valence is None or view.episode.outcome_valence > 0):
+            return (False, f"episode.outcome set but valence={view.episode.outcome_valence} (expected <= 0)")
         return (True, f"outcome set, valence={view.episode.outcome_valence}")
     return check
 
@@ -414,7 +480,7 @@ FIXTURE_ASSERTIONS: dict[str, list[Assertion]] = {
     "old_episodic": [
         _a("D-MEM-1", DIM_MEMORY, "Debugging an outage is an episodic memory (it happened)", True, _has_memory_system("episodic")),
         _a("D-OVR-1", DIM_OVER_INFERENCE, "A single recounted activity is not a world_claim belief", False, _no_beliefs),
-        _a("D-EPI-1", DIM_EPISODE, "No cognitive operations are visible in the text (advisory)", False, _no_episode),
+        _a("D-EPI-1", DIM_EPISODE, "Bare activity report has no visible cognitive engagement", True, _no_episode),
     ],
 
     "newer_generalization": [
@@ -445,7 +511,11 @@ FIXTURE_ASSERTIONS: dict[str, list[Assertion]] = {
         _a("G-EPI-2", DIM_EPISODE, "Episode kind is learning", True, _episode_kind_in({"learning"})),
         _a("G-MEM-1", DIM_MEMORY, "'I could explain it' is a capability -> procedural memory", True, _has_memory_system("procedural")),
         _a("G-TRC-1", DIM_TRACE, "Trace contains seek_information (read the docs)", True, _traces_include("seek_information")),
+        _a("G-TRC-2", DIM_TRACE, "No revise step -- nothing was believed and then changed", True,
+            lambda v: ("revise" not in v.trace_ops(), f"trace ops={v.trace_ops()}")),
         _a("G-DEC-1", DIM_DECISION, "No decision was made", True, _no_decision),
+        _a("G-OUT-1", DIM_DECISION, "'Could explain it by the end' is a capability gained -> the outcome, not the resolution",
+            True, _episode_has_outcome(positive=None)),
     ],
 
     "episode_reflection_belief_revision": [
@@ -464,6 +534,8 @@ FIXTURE_ASSERTIONS: dict[str, list[Assertion]] = {
         _a("I-EPI-1", DIM_EPISODE, "Emits an episode", True, _has_episode),
         _a("I-EPI-2", DIM_EPISODE, "Episode kind is conflict (or social)", True, _episode_kind_in({"conflict", "social"})),
         _a("I-TRC-1", DIM_TRACE, "Trace contains defer (agreed to revisit next week)", True, _traces_include("defer")),
+        _a("I-OUT-1", DIM_DECISION, "Agreement to revisit is the resolution, not an episode outcome", True,
+            _episode_has_resolution_without_outcome),
         _a("I-DEC-1", DIM_DECISION, "If a decision is emitted it must be undecided (deferred)", True,
             lambda v: (True, "no decision emitted") if not v.decisions else _decision_undecided(v)),
         _a("I-STA-1", DIM_STATE_ITEM, "The unresolved hiring question is an open state item", False,
@@ -499,7 +571,9 @@ FIXTURE_ASSERTIONS: dict[str, list[Assertion]] = {
         _a("L-EPI-1", DIM_EPISODE, "Emits an episode", True, _has_episode),
         _a("L-STA-1", DIM_STATE_ITEM, "At least one attention state item is captured", True, _has_state_item_kind("attention")),
         _a("L-STA-2", DIM_STATE_ITEM, "Both sides of the shift are captured (advisory)", False, _has_state_item_kind("attention", minimum=2)),
-        _a("L-DEC-1", DIM_DECISION, "Dropping one task for an urgent one need not be a formal decision (advisory)", False, _no_decision),
+        _a("L-STA-3", DIM_STATE_ITEM, "Focus shift alone does not establish goal/project state", True,
+            _no_episode_state_kind("goal", "project")),
+        _a("L-DEC-1", DIM_DECISION, "Abandoning a task does not itself establish an explicit choice between alternatives", True, _no_decision),
     ],
 
     "episode_hypothesis": [
@@ -523,8 +597,66 @@ FIXTURE_ASSERTIONS: dict[str, list[Assertion]] = {
 
     "episode_outcome_without_decision": [
         _a("O-EPI-1", DIM_EPISODE, "Emits an episode", True, _has_episode),
-        _a("O-DEC-1", DIM_DECISION, "No decision -- nothing was decided, work simply happened", True, _no_decision),
-        _a("O-OUT-1", DIM_DECISION, "The episode itself carries the outcome, with positive valence", True, _episode_has_outcome(positive=True)),
+        _a("O-DEC-1", DIM_DECISION, "No decision -- no choice between alternatives is described", True, _no_decision),
+        _a("O-OUT-1", DIM_DECISION, "The episode carries the supported positive result", True, _episode_has_outcome(positive=True)),
+    ],
+
+    "episode_bare_activity": [
+        _a("P-MEM-1", DIM_MEMORY, "Bare activity is retained as episodic memory", True, _has_memory_system("episodic")),
+        _a("P-EPI-1", DIM_EPISODE, "Bare activity does not establish cognitive engagement", True, _no_episode),
+    ],
+    "episode_visible_investigation": [
+        _a("Q-EPI-1", DIM_EPISODE, "Visible investigation supports a problem-solving episode", True, _has_episode),
+        _a("Q-TRC-1", DIM_TRACE, "DNS check is recorded as information seeking", True, _traces_include("seek_information")),
+        _a("Q-TRC-2", DIM_TRACE, "Comparing the configuration to a known-good cluster is recorded", True, _traces_include("compare")),
+        _a("Q-ACT-1", DIM_MEMORY, "Rollback is the action memory", True, _has_action_memory),
+    ],
+    "episode_attention_shift_with_goal": [
+        _a("R-EPI-1", DIM_EPISODE, "Observable abandonment supports the episode", True, _has_episode),
+        _a("R-STA-1", DIM_STATE_ITEM, "Explicit desired result is a goal state", True, _has_state_item_kind("goal")),
+        _a("R-STA-2", DIM_STATE_ITEM, "Current focus is represented as attention", True, _has_state_item_kind("attention")),
+        _a("R-DEC-1", DIM_DECISION, "Abandonment does not imply an explicit decision", True, _no_decision),
+    ],
+    # Episode-scoped goal/project state cannot exist without an episode, so
+    # the no-episode assertion already covers it. The remaining leak is a
+    # semantic memory of kind 'goal' (classification.md §1 allows one for a
+    # referenced goal), which is what these check.
+    "episode_topic_not_goal": [
+        _a("S-EPI-1", DIM_EPISODE, "A topic being on the owner's mind is not an episode", True, _no_episode),
+        _a("S-MEM-1", DIM_OVER_INFERENCE, "A topic mention alone is not recorded as a goal memory", True, _no_memory_kind("goal")),
+    ],
+    "episode_project_mention_only": [
+        _a("T-EPI-1", DIM_EPISODE, "A one-time project mention is not an episode", True, _no_episode),
+        _a("T-MEM-1", DIM_MEMORY, "The work is retained as an episodic memory", True, _has_memory_system("episodic")),
+        _a("T-MEM-2", DIM_OVER_INFERENCE, "A project mention alone is not recorded as a goal memory", True, _no_memory_kind("goal")),
+        _a("T-ENT-1", DIM_ENTITY, "Phynx is resolved as an entity (advisory; kind project expected)", False, _has_entity_like("Phynx")),
+    ],
+    "episode_activity_without_outcome": [
+        _a("W-EPI-1", DIM_EPISODE, "Activity without visible engagement is not an episode", True, _no_episode),
+        _a("W-MEM-1", DIM_MEMORY, "The activity is retained as an episodic memory", True, _has_memory_system("episodic")),
+        _a("W-OVR-1", DIM_OVER_INFERENCE, "No result is invented: nothing beyond the one episodic memory", False,
+            lambda v: (len(v.memories) <= 1 and not v.beliefs,
+                       f"memories={[m.content[:30] for m in v.memories]}, beliefs={len(v.beliefs)}")),
+    ],
+    "episode_negative_outcome": [
+        _a("V-EPI-1", DIM_EPISODE, "Visible investigation supports an episode", True, _has_episode),
+        _a("V-OUT-1", DIM_DECISION, "'The release slipped a week' is a stated, clearly negative consequence", True,
+            _episode_has_outcome(positive=False)),
+        _a("V-RES-1", DIM_EPISODE, "'Still fails' is where the situation stands -> the resolution", False,
+            lambda v: (bool(v.episode and v.episode.resolution),
+                       f"resolution={v.episode.resolution if v.episode else None!r}")),
+    ],
+    # Owner's rule: an unresolved result may be negative, but "still fails"
+    # alone states no consequence and no direction, so none may be inferred.
+    "episode_unresolved_without_outcome": [
+        _a("X-EPI-1", DIM_EPISODE, "Visible investigation supports an episode", True, _has_episode),
+        _a("X-OUT-1", DIM_EPISODE, "'Still fails' is recorded as the resolution with no outcome", True,
+            _episode_has_resolution_without_outcome),
+        _a("X-OUT-2", DIM_OVER_INFERENCE, "No positive valence is inferred from an unresolved result", True,
+            _episode_valence_not_positive),
+        _a("X-OUT-3", DIM_OVER_INFERENCE, "No valence at all is inferred from ambiguous wording (advisory)", False,
+            lambda v: (v.episode is None or v.episode.outcome_valence is None,
+                       f"outcome_valence={v.episode.outcome_valence if v.episode else None}")),
     ],
 }
 

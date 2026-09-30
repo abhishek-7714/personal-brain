@@ -88,7 +88,14 @@ check("C.1 every fixture in the corpus has its own assertions",
       all(f.key in FIXTURE_ASSERTIONS for f in FIXTURES),
       str([f.key for f in FIXTURES if f.key not in FIXTURE_ASSERTIONS]))
 
-check("C.2 all 15 fixtures covered", len(FIXTURE_ASSERTIONS) == 15, str(len(FIXTURE_ASSERTIONS)))
+# Keyed to the fixture list rather than a literal count, so adding a fixture
+# requires adding its assertions, and an orphaned assertion entry is caught.
+check("C.2 assertion entries and fixtures match one-to-one",
+      set(FIXTURE_ASSERTIONS) == {f.key for f in FIXTURES},
+      f"no assertions: {sorted({f.key for f in FIXTURES} - set(FIXTURE_ASSERTIONS))}; "
+      f"no fixture: {sorted(set(FIXTURE_ASSERTIONS) - {f.key for f in FIXTURES})}")
+check("C.6 fixture codes never use the universal 'U-' prefix",
+      all(not a.code.startswith("U-") for entries in FIXTURE_ASSERTIONS.values() for a in entries))
 
 all_dims = {a.dimension for a in UNIVERSAL_ASSERTIONS}
 for key in FIXTURE_ASSERTIONS:
@@ -204,7 +211,7 @@ check("G.2 a trace using vocabulary absent from the source scores 0.0 (invented 
 
 
 # ===========================================================================
-section("MOCK PATH: full 15-fixture corpus scores cleanly")
+section("MOCK PATH: full fixture corpus scores cleanly")
 # ===========================================================================
 
 conn = psycopg2.connect(os.environ.get("PG_DSN", "postgresql://brain:brain@localhost:5432/brain"))
@@ -219,7 +226,8 @@ else:
     owner_id = str(row[0])
 
 evaluations = evaluate_all(mode="mock", conn=conn, owner_id=owner_id)
-check("M.1 all 15 fixtures scored", len(evaluations) == 15 and all(e.status == "scored" for e in evaluations),
+check(f"M.1 all {len(FIXTURES)} fixtures scored",
+      len(evaluations) == len(FIXTURES) and all(e.status == "scored" for e in evaluations),
       str([(e.fixture_key, e.status) for e in evaluations if e.status != "scored"]))
 
 essential_failures = [(e.fixture_key, [f.code for f in e.essential_failures])
