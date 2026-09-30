@@ -22,10 +22,10 @@ from pathlib import Path
 from typing import Iterator
 
 import psycopg2
-from fastapi import Request
+from fastapi import HTTPException, Request
 
 from core.embedder import Embedder, MockEmbedder, VoyageEmbedder
-from core.storage import MockStorageClient, StorageClient
+from core.storage import StorageClient
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 PG_DSN = os.environ.get("PG_DSN", "postgresql://brain:brain@localhost:5432/brain")
@@ -63,15 +63,17 @@ def get_embedder() -> Embedder:
 
 def get_storage() -> StorageClient:
     """
-    Real MinIO by default -- the console is meant to exercise the actual
-    storage architecture, not a mock of it. Falls back to an in-memory mock
-    only if MinIO is genuinely unreachable, so the console degrades instead
-    of hard-failing every ingest when MinIO isn't running.
+    Real MinIO only, and a 503 when it is unreachable. There is deliberately
+    no in-memory fallback: experiences are append-only and cannot be deleted
+    (migration 003), so an ingest against a per-request mock would commit a
+    permanent experience whose content_uri points at raw text that vanished
+    with the request -- an unrepairable break in the evidence chain. Failing
+    the request costs a retry; the fallback cost the raw record.
     """
     try:
         from core.storage import from_env
         client = from_env()
         client._client.bucket_exists(client.BUCKET)  # cheap reachability probe
         return client
-    except Exception:
-        return MockStorageClient()
+    except Exception as e:
+        raise HTTPException(503, f"MinIO unreachable, refusing to ingest without raw storage: {e}")

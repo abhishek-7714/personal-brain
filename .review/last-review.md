@@ -1,5 +1,5 @@
-No open or disputed issue IDs are listed in `.review/ledger.md`.
+No ledger issues are open or disputed. ISS-1 is already marked fixed.
 
-- **NEW — medium — [vector/collections.py](/Users/abhis/Documents/personal-brain/vector/collections.py):** The collection bootstrap defaults to 1536 dimensions, while both embedders default to 1024. On the documented setup without `EMBEDDING_DIM` exported in the shell, indexing fails with a dimension mismatch.
+- **NEW — medium — [api/deps.py](/Users/abhis/Documents/personal-brain/api/deps.py:64):** If MinIO is unreachable, each request gets a fresh in-memory mock storage client. Ingestion can then commit an experience whose raw text disappears with that request, so later inspection cannot retrieve it.
 
 VERDICT: CHANGES
