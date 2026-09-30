@@ -43,6 +43,10 @@ if not ok:
     print(f"SKIP  Stack not reachable: {msg}")
     sys.exit(3)
 
+# Before any write: the MOCK PATH section commits every fixture's ingest.
+from _db_guard import require_scratch_database
+require_scratch_database("test_calibration_eval")
+
 import psycopg2
 
 from core.calibration_assertions import (

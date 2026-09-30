@@ -51,6 +51,10 @@ if not ok:
     print("      Start with: docker compose up -d")
     sys.exit(3)
 
+# Before any write: this suite seeds an owner and commits fixture ingests.
+from _db_guard import require_scratch_database
+require_scratch_database("test_episodes")
+
 import psycopg2
 
 from core.calibration_fixtures import get_fixture

@@ -71,6 +71,10 @@ if not ok:
     print("      Start with: docker compose up -d")
     sys.exit(3)
 
+# Before any write: this suite seeds an owner and commits fixture ingests.
+from _db_guard import require_scratch_database
+require_scratch_database("test_api")
+
 from fastapi.testclient import TestClient
 
 from api.main import app
