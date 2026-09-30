@@ -1,0 +1,28 @@
+# Runtime dependencies for the personal-brain ingestion vertical slice.
+# Install: pip install -r requirements.txt
+
+# LLM extraction
+anthropic>=0.40.0
+
+# Database
+psycopg2-binary>=2.9.0
+
+# Object storage
+minio>=7.2.0
+
+# Graph database
+neo4j>=5.0.0
+
+# Vector store (used by vector/collections.py)
+# Pinned to the server's minor version (docker-compose.yml: qdrant v1.12.4); the
+# client refuses to vouch for a server more than one minor version apart.
+qdrant-client>=1.12.0,<1.13
+
+# Embeddings (used by core/embedder.py). Anthropic recommends Voyage AI for
+# embeddings -- it has no embeddings endpoint of its own.
+voyageai>=0.5.0
+
+# Brain Console API (api/) -- thin FastAPI wrapper over core/*.py
+fastapi>=0.110.0
+uvicorn>=0.25.0
+httpx>=0.28.0
